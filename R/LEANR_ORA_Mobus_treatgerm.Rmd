@@ -1,0 +1,557 @@
+---
+title: "LEANR Mobus TREATgermany"
+author: "Ashley Morrison"
+date: "2023-06-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(DESeq2)
+library(data.tree)
+library(treemap)
+library(DiagrammeR)
+#library(edgeR)
+library(RColorBrewer)
+library(fixr)
+library(igraph)
+library(LEANR)
+library(tidyr)
+library(ggplot2)
+library(sigora)
+library(org.Hs.eg.db)
+library(pathfindR)
+library(fgsea)
+library(ggforce)
+library(ggbreak) 
+library(ggbreak) 
+library(dplyr)
+library(data.table)
+library(ggvenn)
+library(knitr)
+library(kableExtra)
+library(ggrepel)
+library(ggVennDiagram)
+
+source("LEANR_ORA_utils.R")
+
+```
+
+reference:
+https://cran.r-project.org/web/packages/pathfindR/vignettes/manual_execution.html
+https://cran.r-project.org/web/packages/pathfindR/vignettes/obtain_data.html
+https://bioconductor.org/packages/release/bioc/manuals/fgsea/man/fgsea.pdf
+https://pnnl-comp-mass-spec.github.io/proteomics-data-analysis-tutorial/ora.html#fgsea-ora
+
+
+read in source files:
+```{r}
+#protein key/edges
+alias <- read.delim("../../STRING_db/9606.protein.aliases.v11.5.txt")
+colnames(alias) <- c("STRING_id", "alias", "source")
+
+ppi <- read.table("../../STRING_db/9606.protein.links.v11.5.txt",header=T)
+
+#this is the version of the AD gene lists that have the STRING IDs matched
+#AD_sig <- read.csv("../source_data/name_keys/AD_gene_set_with_STRING_ids.csv", row.names=1)
+#AD_sig <- read.csv("../source_data/name_keys/AD_gene_set_with_STRING_ids_20230814.csv")
+AD_sig <- read.csv("../../name_key/AD_gene_set_with_STRING_ids_20230904.csv")
+
+#naming keys:
+mobus_limma_key <- read.csv("../source_data/mobus_treatgermany_rnaseq_string_name_key.csv")
+full_ppi_naming_key <- read.csv("../../name_key/full_string_9606_ID_symbol_naming_key.csv")
+
+```
+
+read in limma results from endotype study:
+```{r}
+limma_res <- read.csv("../../public_data/mobus_rnaseq/mobus_rnaseq_AD_healthy_serum_l2fc.csv")
+#write.csv(limma_res,"../../public_data/mobus_rnaseq/mobus_rnaseq_AD_healthy_serum_l2fc.csv")
+
+limma_res_eso <- read.csv("../../public_data/mobus_rnaseq/mobus_rnase_AD_endotype_eosinophil_low_v_eosinophil_high_updated.csv")
+limma_res_dupi <- read.csv("../../public_data/mobus_rnaseq/mobus_rnaseq_AD_m0_m3_dupi_treated.csv")
+#write.csv(limma_res_eso,"../../public_data/mobus_rnaseq/mobus_rnase_AD_endotype_eosinophil_low_v_eosinophil_high_updated.csv")
+#write.csv(limma_res_dupi,"../../public_data/mobus_rnaseq/mobus_rnaseq_AD_m0_m3_dupi_treated.csv")
+
+
+limma_res_eso_high_v_healthy <- read.csv("../../public_data/mobus_rnaseq/mobus_rnase_AD_AD_eosinophil_high_v_healthy.csv")
+#write.csv(limma_res_eso_high_v_healthy,"../../public_data/mobus_rnaseq/mobus_rnase_AD_AD_eosinophil_high_v_healthy.csv")
+
+limma_res_eso_low_v_healthy <- read.csv("../../public_data/mobus_rnaseq/mobus_rnase_AD_AD_eosinophil_low_v_healthy.csv")
+#write.csv(limma_res_eso_low_v_healthy,"../../public_data/mobus_rnaseq/mobus_rnase_AD_AD_eosinophil_low_v_healthy.csv")
+
+
+limma_res_dupi_high <- read.csv("../../public_data/mobus_rnaseq/mobus_rnase_AD_eso_high_pre_post.csv")
+#write.csv(limma_res_dupi_high,"../../public_data/mobus_rnaseq/mobus_rnase_AD_eso_high_pre_post.csv")
+
+limma_res_dupi_low <- read.csv("../../public_data/mobus_rnaseq/mobus_rnase_AD_eso_low_pre_post.csv",row.names = 1)
+#write.csv(limma_res_dupi_low,"../../public_data/mobus_rnaseq/mobus_rnase_AD_eso_low_pre_post.csv")
+
+```
+
+read in LEANR/ORA only results:
+```{r}
+LEAN_results_ADvH_exp_400_pval <- readRDS("../derived_data/mobus_rnaseq/LEAN_results_ADvH_exp_400_pval.rds")
+LEAN_results_ADvH_exp_600_pval <- readRDS("../derived_data/mobus_rnaseq/LEAN_results_ADvH_exp_600_pval.rds")
+LEAN_results_ADvH_exp_900_pval <- readRDS("../derived_data/mobus_rnaseq/LEAN_results_ADvH_exp_900_pval.rds")
+
+```
+
+
+# Make different PPIs to test:
+Using only experimental at different combined score cutoffs
+
+Make PPI with JUST proteins from experimental data:
+```{r}
+#400
+ppi_exp <- ppi
+
+#filter to JUST proteins from experimental data:
+prot <- mobus_limma_key$STRING_id
+ppi_exp_filt <- ppi_exp %>% filter(protein1 %in% prot & protein2 %in% prot) %>% 
+  filter(protein1 !="9606.ENSP00000476774" & protein2 != "9606.ENSP00000476774")
+
+#filter out edges below 400
+ppi_exp_filt_400 <- ppi_exp_filt %>% filter(combined_score >= 400)
+
+nrow(ppi_exp_filt) # 11384988 edges with total, 24574
+nrow(ppi_exp_filt_400) # 1714440 edges after filtering to 400 with JUST proteins in assay, 3478
+
+#make graph:
+ppi_graph_400_exper_only_network <- graph_from_data_frame(ppi_exp_filt_400, directed=FALSE, vertices=NULL)
+E(ppi_graph_400_exper_only_network)$weight <- ppi_exp_filt_400$combined_score
+
+proteins_in_exp_only_graph_400 <- V(ppi_graph_400_exper_only_network)$name
+
+head(proteins_in_exp_only_graph_400)
+length(proteins_in_exp_only_graph_400)
+
+#600
+ppi_exp <- ppi
+
+#filter to JUST proteins from experimental data:
+prot <- mobus_limma_key$STRING_id
+ppi_exp_filt <- ppi_exp %>% filter(protein1 %in% prot & protein2 %in% prot) %>% 
+  filter(protein1 !="9606.ENSP00000476774" & protein2 != "9606.ENSP00000476774")
+
+#filter out edges below 600
+ppi_exp_filt_600 <- ppi_exp_filt %>% filter(combined_score >= 600)
+
+nrow(ppi_exp_filt) # 11384988 edges with total, 24574
+nrow(ppi_exp_filt_600) # 775726 edges after filtering to 600 with JUST proteins in assay, 3478
+
+#make graph:
+ppi_graph_600_exper_only_network <- graph_from_data_frame(ppi_exp_filt_600, directed=FALSE, vertices=NULL)
+E(ppi_graph_600_exper_only_network)$weight <- ppi_exp_filt_600$combined_score
+
+proteins_in_exp_only_graph_600 <- V(ppi_graph_600_exper_only_network)$name
+
+head(proteins_in_exp_only_graph_600)
+length(proteins_in_exp_only_graph_600)
+
+#900
+ppi_exp <- ppi
+
+#filter to JUST proteins from experimental data:
+prot <- mobus_limma_key$STRING_id
+ppi_exp_filt <- ppi_exp %>% filter(protein1 %in% prot & protein2 %in% prot) %>% 
+  filter(protein1 !="9606.ENSP00000476774" & protein2 != "9606.ENSP00000476774")
+
+#filter out edges below 900
+ppi_exp_filt_900 <- ppi_exp_filt %>% filter(combined_score >= 900)
+
+nrow(ppi_exp_filt) # 11384988 edges with total, 24574
+nrow(ppi_exp_filt_900) # 239926 edges after filtering to 900 with JUST proteins in assay, 3478
+
+#make graph:
+ppi_graph_900_exper_only_network <- graph_from_data_frame(ppi_exp_filt_900, directed=FALSE, vertices=NULL)
+E(ppi_graph_900_exper_only_network)$weight <- ppi_exp_filt_900$combined_score
+
+proteins_in_exp_only_graph_900 <- V(ppi_graph_900_exper_only_network)$name
+
+head(proteins_in_exp_only_graph_900)
+length(proteins_in_exp_only_graph_900)
+
+```
+
+
+# LEANR
+
+## Format data into pval lists for LEANR analysis
+
+AD v healthy
+```{r}
+colnames(limma_res)
+
+## pvals_Adult.ADvsHealthy
+limma_ADvH <- limma_res %>% dplyr::select(Ensembl_ID,STRING_id,log2FoldChange,pvalue,padj) %>% 
+  filter(STRING_id != "") %>% 
+  arrange(by=padj)
+#make list of adjusted pvals:
+limma_ADvH_pval <- (as.vector(as.numeric(limma_ADvH$padj)))
+names(limma_ADvH_pval) <- (limma_ADvH$STRING_id)
+
+head(limma_ADvH_pval)
+length(limma_ADvH_pval)
+
+```
+
+AD eso high v low
+```{r}
+colnames(limma_res_eso)
+
+## pvals_Adult.ADvsHealthy
+limma_eso <- limma_res_eso %>% dplyr::select(Ensembl_ID,STRING_id,log2FoldChange,pvalue,padj) %>% 
+  filter(STRING_id != "#N/A") %>% 
+  arrange(by=padj)
+
+#make list of adjusted pvals:
+limma_eso_pval <- (as.vector(as.numeric(limma_eso$padj)))
+names(limma_eso_pval) <- (limma_eso$STRING_id)
+
+head(limma_eso_pval)
+length(limma_eso_pval)
+
+```
+
+AD m3 v m0
+```{r}
+colnames(limma_res_dupi)
+
+## pvals_Adult.ADvsHealthy
+limma_dupi <- limma_res_dupi %>% dplyr::select(Ensembl_ID,STRING_id,log2FoldChange,pvalue,padj) %>% 
+  filter(STRING_id != "#N/A") %>% 
+  arrange(by=padj)
+#make list of adjusted pvals:
+limma_dupi_pval <- (as.vector(as.numeric(limma_dupi$padj)))
+names(limma_dupi_pval) <- (limma_dupi$STRING_id)
+
+head(limma_dupi_pval)
+length(limma_dupi_pval)
+
+```
+
+eso v healthy
+```{r}
+## high
+colnames(limma_res_eso_high_v_healthy)
+
+limma_eso_high_v_healthy <- limma_res_eso_high_v_healthy %>% dplyr::select(Ensembl_ID,STRING_id,log2FoldChange,pvalue,padj) %>% 
+  filter(STRING_id != "#N/A") %>% 
+  arrange(by=padj)
+
+#make list of adjusted pvals:
+limma_eso_high_v_healthy_pval <- (as.vector(as.numeric(limma_eso_high_v_healthy$padj)))
+names(limma_eso_high_v_healthy_pval) <- (limma_eso_high_v_healthy$STRING_id)
+
+head(limma_eso_high_v_healthy_pval)
+length(limma_eso_high_v_healthy_pval)
+
+
+## low
+colnames(limma_res_eso_low_v_healthy)
+
+limma_eso_low_v_healthy <- limma_res_eso_low_v_healthy %>% dplyr::select(Ensembl_ID,STRING_id,log2FoldChange,pvalue,padj) %>% 
+  filter(STRING_id != "#N/A") %>% 
+  arrange(by=padj)
+
+#make list of adjusted pvals:
+limma_eso_low_v_healthy_pval <- (as.vector(as.numeric(limma_eso_low_v_healthy$padj)))
+names(limma_eso_low_v_healthy_pval) <- (limma_eso_low_v_healthy$STRING_id)
+
+head(limma_eso_low_v_healthy_pval)
+length(limma_eso_low_v_healthy_pval)
+```
+
+eso dupi
+```{r}
+## high
+colnames(limma_res_dupi_high)
+limma_dupi_high <- limma_res_dupi_high %>% dplyr::select(Ensembl_ID,STRING_id,log2FoldChange,pvalue,padj) %>% 
+  filter(STRING_id != "#N/A") %>% 
+  arrange(by=padj)
+#make list of adjusted pvals:
+limma_dupi_high_pval <- (as.vector(as.numeric(limma_dupi_high$padj)))
+names(limma_dupi_high_pval) <- (limma_dupi_high$STRING_id)
+
+head(limma_dupi_high_pval)
+length(limma_dupi_high_pval)
+
+## low
+colnames(limma_res_dupi_low)
+limma_dupi_low <- limma_res_dupi_low %>% dplyr::select(Ensembl_ID,STRING_id,log2FoldChange,pvalue,padj) %>% 
+  filter(STRING_id != "#N/A") %>% 
+  arrange(by=padj)
+#make list of adjusted pvals:
+limma_dupi_pval_low <- (as.vector(as.numeric(limma_dupi_low$padj)))
+names(limma_dupi_pval_low) <- (limma_dupi_low$STRING_id)
+
+head(limma_dupi_pval_low)
+length(limma_dupi_pval_low)
+```
+
+
+
+## check that formatting is correct:
+```{r}
+length(proteins_in_exp_only_graph_900)
+
+proteins_in_exp_only_graph_400[proteins_in_exp_only_graph_400 %in% names(limma_ADvH_pval)==F] # "9606.ENSP00000476774"
+proteins_in_exp_only_graph_600[proteins_in_exp_only_graph_600 %in% names(limma_ADvH_pval)==F] # "9606.ENSP00000476774"
+
+proteins_in_exp_only_graph_900[proteins_in_exp_only_graph_900 %in% names(limma_ADvH_pval)==F] # "9606.ENSP00000476774"
+
+unique(names(limma_eso_pval) %in% names(limma_ADvH_pval))
+```
+
+
+## Run LEANR: (dont need to do, read in above)
+
+AD_v_healthy
+```{r,eval=F, include=F}
+## AD_v_healthy:
+LEAN_results_ADvH_exp_400_pval <- run.lean(limma_ADvH_pval,ppi_graph_400_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+LEAN_results_ADvH_exp_600_pval <- run.lean(limma_ADvH_pval,ppi_graph_600_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+LEAN_results_ADvH_exp_900_pval <- run.lean(limma_ADvH_pval,ppi_graph_900_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+
+LEAN_results_ADvH_exp_900_pval$restab
+
+
+#save results:
+#saveRDS(LEAN_results_ADvH_exp_400_pval,"../derived_data/mobus_rnaseq/LEAN_results_ADvH_exp_400_pval.rds")
+#saveRDS(LEAN_results_ADvH_exp_600_pval,"../derived_data/mobus_rnaseq/LEAN_results_ADvH_exp_600_pval.rds")
+#saveRDS(LEAN_results_ADvH_exp_900_pval,"../derived_data/mobus_rnaseq/LEAN_results_ADvH_exp_900_pval.rds")
+
+
+```
+
+eso
+```{r,eval=F, include=F}
+## AD_v_healthy:
+LEAN_results_eso_exp_400_pval <- run.lean(limma_eso_pval,ppi_graph_400_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+LEAN_results_eso_exp_600_pval <- run.lean(limma_eso_pval,ppi_graph_600_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+LEAN_results_eso_exp_900_pval <- run.lean(limma_eso_pval,ppi_graph_900_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+
+LEAN_results_eso_exp_900_pval$restab
+
+
+#save results:
+#saveRDS(LEAN_results_eso_exp_400_pval,"../derived_data/mobus_rnaseq/LEAN_results_eso_exp_400_pval.rds")
+#saveRDS(LEAN_results_eso_exp_600_pval,"../derived_data/mobus_rnaseq/LEAN_results_eso_exp_600_pval.rds")
+#saveRDS(LEAN_results_eso_exp_900_pval,"../derived_data/mobus_rnaseq/LEAN_results_eso_exp_900_pval.rds")
+
+
+```
+
+dupi
+```{r,eval=F, include=F}
+
+LEAN_results_dupi_exp_400_pval <- run.lean(limma_dupi_pval,ppi_graph_400_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+LEAN_results_dupi_exp_600_pval <- run.lean(limma_dupi_pval,ppi_graph_600_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+LEAN_results_dupi_exp_900_pval <- run.lean(limma_dupi_pval,ppi_graph_900_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+
+
+#save results:
+#saveRDS(LEAN_results_dupi_exp_400_pval,"../derived_data/mobus_rnaseq/LEAN_results_dupi_exp_400_pval.rds")
+#saveRDS(LEAN_results_dupi_exp_600_pval,"../derived_data/mobus_rnaseq/LEAN_results_dupi_exp_600_pval.rds")
+#saveRDS(LEAN_results_dupi_exp_900_pval,"../derived_data/mobus_rnaseq/LEAN_results_dupi_exp_900_pval.rds")
+
+
+```
+
+eso v healthy and eso dupi
+```{r}
+#re-run eso DONE!
+#LEAN_results_eso_exp_900_pval <- run.lean(limma_eso_pval,ppi_graph_900_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+
+#saveRDS(LEAN_results_eso_exp_900_pval,"../derived_data/mobus_rnaseq/LEAN_results_eso_exp_900_pval.rds")
+
+## eso high v healthy
+LEAN_results_eso_high_v_healthy_exp_600_pval <- run.lean(limma_eso_high_v_healthy_pval,ppi_graph_600_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+View(as.data.frame(LEAN_results_eso_high_v_healthy_exp_600_pval$restab))
+
+#saveRDS(LEAN_results_eso_high_v_healthy_exp_600_pval,"../derived_data/mobus_rnaseq/LEAN_results_eso_high_v_healthy_exp_600_pval.rds")
+
+#LEAN_results_eso_high_v_healthy_exp_900_pval <- run.lean(limma_eso_high_v_healthy_pval,ppi_graph_900_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+#saveRDS(LEAN_results_eso_high_v_healthy_exp_900_pval,"../derived_data/mobus_rnaseq/LEAN_results_eso_high_v_healthy_exp_900_pval.rds")
+#res_LEAN_results_eso_high_v_healthy_exp_900_pval <- as.data.frame(LEAN_results_eso_high_v_healthy_exp_900_pval$restab)
+#View(res_LEAN_results_eso_high_v_healthy_exp_900_pval)
+
+## eso low v healthy
+LEAN_results_eso_low_v_healthy_exp_600_pval <- run.lean(limma_eso_low_v_healthy_pval,ppi_graph_600_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+View(as.data.frame(LEAN_results_eso_low_v_healthy_exp_600_pval$restab))
+
+#saveRDS(LEAN_results_eso_low_v_healthy_exp_600_pval,"../derived_data/mobus_rnaseq/LEAN_results_eso_low_v_healthy_exp_600_pval.rds")
+
+#LEAN_results_eso_low_v_healthy_exp_900_pval <- run.lean(limma_eso_low_v_healthy_pval,ppi_graph_900_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+#saveRDS(LEAN_results_eso_low_v_healthy_exp_900_pval,"../derived_data/mobus_rnaseq/LEAN_results_eso_low_v_healthy_exp_900_pval.rds")
+#res_LEAN_results_eso_low_v_healthy_exp_900_pval <- as.data.frame(LEAN_results_eso_low_v_healthy_exp_900_pval$restab)
+#View(res_LEAN_results_eso_low_v_healthy_exp_900_pval)
+
+## eso high dupi
+LEAN_results_limma_dupi_high_pval_exp_600_pval <- run.lean(limma_dupi_high_pval,ppi_graph_600_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+#saveRDS(LEAN_results_limma_dupi_high_pval_exp_600_pval,"../derived_data/mobus_rnaseq/LLEAN_results_limma_dupi_high_pval_exp_600_pval.rds")
+
+#LEAN_results_limma_dupi_high_pval_exp_900_pval <- run.lean(limma_dupi_high_pval,ppi_graph_900_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+#saveRDS(LEAN_results_limma_dupi_high_pval_exp_900_pval,"../derived_data/mobus_rnaseq/LEAN_results_limma_dupi_high_pval_exp_900_pval.rds")
+#res_LEAN_results_limma_dupi_high_pval_exp_900_pval <- as.data.frame(LEAN_results_limma_dupi_high_pval_exp_900_pval$restab)
+#View(res_LEAN_results_limma_dupi_high_pval_exp_900_pval)
+
+## eso low dupi STILL RUN!!
+LEAN_results_limma_dupi_low_pval_exp_600_pval <- run.lean(limma_dupi_pval_low,ppi_graph_600_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+#saveRDS(LEAN_results_limma_dupi_low_pval_exp_600_pval,"../derived_data/mobus_rnaseq/LEAN_results_limma_dupi_low_pval_exp_600_pval.rds")
+
+
+#LEAN_results_limma_dupi_low_pval_exp_900_pval <- run.lean(limma_dupi_pval_low,ppi_graph_900_exper_only_network, n_reps = 10000, keep.nodes.without.scores = F)
+#saveRDS(LEAN_results_limma_dupi_low_pval_exp_900_pval,"../derived_data/mobus_rnaseq/LEAN_results_limma_dupi_low_pval_exp_900_pval.rds")
+#res_LEAN_results_limma_dupi_low_pval_exp_900_pval <- as.data.frame(LEAN_results_limma_dupi_low_pval_exp_900_pval$restab)
+#View(res_LEAN_results_limma_dupi_low_pval_exp_900_pval)
+
+```
+
+
+# Run ORA on Mobus TREATgermany PLEAN results:
+
+Run LEANR+ORA:
+
+AD healthy v AD serum
+```{r}
+ORA_ADvH_exp_900_fdrs <-  readRDS("../derived_data/mobus_rnaseq/ORA_ADvH_exp_900_fdrs.rds")
+ORA_dupi_exp_900_fdrs <-  readRDS("../derived_data/mobus_rnaseq/ORA_dupi_exp_900_fdrs.rds")
+
+
+ORA_ADvH_exp_400_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_ADvH_exp_400_pval,proteins_in_exp_only_graph_400,10)
+ORA_ADvH_exp_600_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_ADvH_exp_600_pval,proteins_in_exp_only_graph_600,10)
+ORA_ADvH_exp_900_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_ADvH_exp_900_pval,proteins_in_exp_only_graph_900,10)
+
+#saveRDS(ORA_ADvH_exp_400_fdrs,"../derived_data/mobus_rnaseq/ORA_ADvH_exp_400_fdrs.rds")
+#saveRDS(ORA_ADvH_exp_600_fdrs,"../derived_data/mobus_rnaseq/ORA_ADvH_exp_600_fdrs.rds")
+#saveRDS(ORA_ADvH_exp_900_fdrs,"../derived_data/mobus_rnaseq/ORA_ADvH_exp_900_fdrs.rds")
+
+```
+
+eso high v low:
+```{r}
+ORA_eso_exp_400_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_eso_exp_400_pval,proteins_in_exp_only_graph_400,10)
+ORA_eso_exp_600_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_eso_exp_600_pval,proteins_in_exp_only_graph_600,10)
+ORA_eso_exp_900_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_eso_exp_900_pval,proteins_in_exp_only_graph_900,10)
+
+results <- as.data.frame(LEAN_results_eso_exp_400_pval$restab)
+
+#saveRDS(ORA_eso_exp_400_fdrs,"../derived_data/mobus_rnaseq/ORA_eso_exp_400_fdrs.rds")
+#saveRDS(ORA_eso_exp_600_fdrs,"../derived_data/mobus_rnaseq/ORA_eso_exp_600_fdrs.rds")
+#saveRDS(ORA_eso_exp_900_fdrs,"../derived_data/mobus_rnaseq/ORA_eso_exp_900_fdrs.rds")
+```
+
+dupi
+```{r}
+ORA_dupi_exp_400_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_dupi_exp_400_pval,proteins_in_exp_only_graph_400,10)
+ORA_dupi_exp_600_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_dupi_exp_600_pval,proteins_in_exp_only_graph_600,10)
+ORA_dupi_exp_900_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_dupi_exp_900_pval,proteins_in_exp_only_graph_900,10)
+
+#saveRDS(ORA_dupi_exp_400_fdrs,"../derived_data/mobus_rnaseq/ORA_dupi_exp_400_fdrs.rds")
+#saveRDS(ORA_dupi_exp_600_fdrs,"../derived_data/mobus_rnaseq/ORA_dupi_exp_600_fdrs.rds")
+#saveRDS(ORA_dupi_exp_900_fdrs,"../derived_data/mobus_rnaseq/ORA_dupi_exp_900_fdrs.rds")
+```
+
+remaining:
+```{r}
+ORA_eso_high_v_healthy_exp_900_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_eso_high_v_healthy_exp_900_pval,proteins_in_exp_only_graph_400,10)
+ORA_eso_low_v_healthy_exp_900_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_eso_low_v_healthy_exp_900_pval,proteins_in_exp_only_graph_400,10)
+ORA_dupi_high_exp_900_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_limma_dupi_high_pval_exp_900_pval,proteins_in_exp_only_graph_400,10)
+#saveRDS(ORA_dupi_high_exp_900_fdrs,"../derived_data/mobus_rnaseq/ORA_dupi_high_exp_900_fdrs.rds")
+ORA_dupi_low_exp_900_fdrs <-  LEANR_ORA(AD_sig,LEAN_results_limma_dupi_low_pval_exp_900_pval,proteins_in_exp_only_graph_400,10)
+
+```
+
+
+
+# Run just ORA:
+
+AD v healthy:
+```{r}
+limma_res_signif <- limma_res %>% filter(padj <= .05 & STRING_id != "")
+colnames(limma_res_signif)[colnames(limma_res_signif)=="padj"] <- "adj.P.Val"
+
+mobus_rnaseq_ORA_only <- DEP_ORA(AD_sig,limma_res_signif,10)
+
+#saveRDS(mobus_rnaseq_ORA_only,"../derived_data/mobus_rnaseq/mobus_rnaseq_advh_ORA_only.rds")
+```
+
+
+eso:
+```{r}
+limma_res_signif_eso <- limma_res_eso %>% filter(padj <= .05 & STRING_id != "#N/A")
+colnames(limma_res_signif_eso)[colnames(limma_res_signif_eso)=="padj"] <- "adj.P.Val"
+
+mobus_rnaseq_ORA_only_eso <- DEP_ORA(AD_sig,limma_res_signif_eso,10)
+
+#saveRDS(mobus_rnaseq_ORA_only_eso,"../derived_data/mobus_rnaseq/mobus_rnaseq_ORA_only_eso.rds")
+```
+
+dupi:
+```{r}
+limma_res_signif_dupi <- limma_res_dupi %>% filter(padj <= .05 & STRING_id != "#N/A")
+colnames(limma_res_signif_dupi)[colnames(limma_res_signif_dupi)=="padj"] <- "adj.P.Val"
+
+mobus_rnaseq_ORA_only_dupi <- DEP_ORA(AD_sig,limma_res_signif_dupi,10)
+
+#saveRDS(mobus_rnaseq_ORA_only_dupi,"../derived_data/mobus_rnaseq/mobus_rnaseq_ORA_only_dupi.rds")
+```
+
+remaining:
+limma_res_eso_high_v_healthy
+limma_res_eso_low_v_healthy
+limma_res_dupi_high
+limma_res_dupi_low
+```{r}
+###### limma_res_eso_high_v_healthy
+limma_res_signif_eso_high_v_healthy <- limma_res_eso_high_v_healthy %>% filter(padj <= .05 & STRING_id != "#N/A")
+colnames(limma_res_signif_eso_high_v_healthy)[colnames(limma_res_signif_eso_high_v_healthy)=="padj"] <- "adj.P.Val"
+
+mobus_rnaseq_ORA_only_eso_high_v_healthy <- DEP_ORA(AD_sig,limma_res_signif_eso_high_v_healthy,10)
+
+#saveRDS(mobus_rnaseq_ORA_only_eso_high_v_healthy,"../derived_data/mobus_rnaseq/mobus_rnaseq_ORA_only_eso_high_v_healthy.rds")
+
+###### limma_res_eso_low_v_healthy
+limma_res_signif_eso_low_v_healthy <- limma_res_eso_low_v_healthy %>% filter(padj <= .05 & STRING_id != "#N/A")
+colnames(limma_res_signif_eso_low_v_healthy)[colnames(limma_res_signif_eso_low_v_healthy)=="padj"] <- "adj.P.Val"
+
+mobus_rnaseq_ORA_only_eso_low_v_healthy <- DEP_ORA(AD_sig,limma_res_signif_eso_low_v_healthy,10)
+
+#saveRDS(mobus_rnaseq_ORA_only_eso_low_v_healthy,"../derived_data/mobus_rnaseq/mobus_rnaseq_ORA_only_eso_low_v_healthy.rds")
+
+
+###### limma_res_dupi_high
+limma_res_signif_dupi_high <- limma_res_dupi_high %>% filter(padj <= .05 & STRING_id != "#N/A")
+colnames(limma_res_signif_dupi_high)[colnames(limma_res_signif_dupi_high)=="padj"] <- "adj.P.Val"
+
+mobus_rnaseq_ORA_only_dupi_high <- DEP_ORA(AD_sig,limma_res_signif_dupi_high,10)
+
+#saveRDS(mobus_rnaseq_ORA_only_dupi_high,"../derived_data/mobus_rnaseq/mobus_rnaseq_ORA_only_dupi_high.rds")
+
+
+###### limma_res_dupi_low
+limma_res_signif_dupi_low <- limma_res_dupi_low %>% filter(padj <= .05 & STRING_id != "#N/A")
+colnames(limma_res_signif_dupi_low)[colnames(limma_res_signif_dupi_low)=="padj"] <- "adj.P.Val"
+
+mobus_rnaseq_ORA_only_dupi_low <- DEP_ORA(AD_sig,limma_res_signif_dupi_low,10)
+
+#saveRDS(mobus_rnaseq_ORA_only_dupi_low,"../derived_data/mobus_rnaseq/mobus_rnaseq_ORA_only_dupi_low.rds")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
