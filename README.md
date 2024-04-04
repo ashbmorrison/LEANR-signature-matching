@@ -10,8 +10,9 @@ LEANR+ORA uses a modified version of the Local Enrichment ANalysis (LEAN) method
 2. The full list of output markers and the associated p-values are overlayed onto a protein-protein interaction network (2) and the LEANR R package used to statistically calculate enrichment of local subnetworks (1). 
 3. Significantly enriched subnetworks are individually tested for gene set enrichment using ORA (fora from FGSEA R package) (3). 
 
-![image](https://github.com/ashbmorrison/LEANR-signature_matching/assets/16310308/201a9571-40fd-4f8a-bdae-b65a39cf868f)
-
+<p align="center">
+  <img width="460" height="300" src="[https://picsum.photos/460/300](https://github.com/ashbmorrison/LEANR-signature_matching/assets/16310308/201a9571-40fd-4f8a-bdae-b65a39cf868f)">
+</p>
 
 ## References
 1. Gwinner, Frederik, et al. “Network-Based Analysis of Omics Data: The LEAN Method | Bioinformatics | Oxford Academic.” OUP Academic, Oxford University Press, 6 Dec. 2016
