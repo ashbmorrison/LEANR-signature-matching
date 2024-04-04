@@ -11,7 +11,7 @@ LEANR+ORA uses a modified version of the Local Enrichment ANalysis (LEAN) method
 3. Significantly enriched subnetworks are individually tested for gene set enrichment using ORA (fora from FGSEA R package) (3). 
 
 <p align="center">
-  <img width="460" height="300" src="LEANR-signature_matching/source_data/image.png">
+  <img width="460" height="300" src="/source_data/image.png">
 </p>
 
 
